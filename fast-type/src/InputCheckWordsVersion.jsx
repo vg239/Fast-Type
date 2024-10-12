@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import WrapWords from './WrapWords';
 import TimeTaken from './TimeTaken';
 import wordList from './words.json';
 
 const InputCheckWordsVersion = ({ value }) => {
-  const navigate = useNavigate();
   const [activeWordIndex, setActiveWordIndex] = useState(0);
   const [activeLetterIndex, setActiveLetterIndex] = useState(0);
   const [correctness, setCorrectness] = useState([]);
   const [startTimer, setStartTimer] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [isTimeUp, setIsTimeUp] = useState(false);
+  const [grossWPM, setGrossWPM] = useState(0);
+  const [netWPM, setNetWPM] = useState(0);
   const startTimeRef = useRef(null);
 
   const generateWords = useCallback(() => {
@@ -37,6 +38,7 @@ const InputCheckWordsVersion = ({ value }) => {
       }
 
       if (pressedKey === " ") {
+        event.preventDefault(); // Prevent the default spacebar behavior
         if (activeLetterIndex > 0) {
           setActiveWordIndex((prevIndex) => prevIndex + 1);
           setActiveLetterIndex(0);
@@ -45,44 +47,35 @@ const InputCheckWordsVersion = ({ value }) => {
       }
 
       if (pressedKey === "Backspace") {
-        setActiveLetterIndex((prevIndex) => Math.max(prevIndex - 1, 0));
-        setCorrectness((prevCorrectness) => {
-          const newCorrectness = [...prevCorrectness];
-          if (newCorrectness[activeWordIndex]) {
-            newCorrectness[activeWordIndex].pop();
-          }
-          return newCorrectness;
-        });
+        if (activeLetterIndex > 0) {
+          setActiveLetterIndex((prevIndex) => prevIndex - 1);
+        }
         return;
       }
 
       if (pressedKey.length === 1) {
         const currentWord = words[activeWordIndex];
         const isCorrect = pressedKey === currentWord[activeLetterIndex];
-      
         setCorrectness((prevCorrectness) => {
           const newCorrectness = [...prevCorrectness];
           if (!newCorrectness[activeWordIndex]) {
             newCorrectness[activeWordIndex] = [];
           }
-          if (activeLetterIndex < currentWord.length) {
-            newCorrectness[activeWordIndex][activeLetterIndex] = isCorrect ? 'correct' : 'incorrect';
-          } else {
-            newCorrectness[activeWordIndex][activeLetterIndex] = { status: 'extra', char: pressedKey };
-          }
+          newCorrectness[activeWordIndex][activeLetterIndex] = isCorrect ? 'correct' : 'incorrect';
           return newCorrectness;
         });
-      
         setActiveLetterIndex((prevIndex) => prevIndex + 1);
+      }
 
-        if (activeWordIndex === words.length - 1 && activeLetterIndex === words[activeWordIndex].length - 1) {
-          setStartTimer(false);
-          const endTime = Date.now();
-          const elapsed = endTime - startTimeRef.current;
-          setElapsedTime(elapsed);
-          const wpm = calculateWPM(elapsed);
-          navigate('/results', { state: { wpm } });
-        }
+      // Check if the user has finished typing the last letter
+      if (activeWordIndex === words.length - 1 && activeLetterIndex === words[activeWordIndex].length - 1) {
+        setStartTimer(false);
+        const endTime = Date.now();
+        const elapsed = endTime - startTimeRef.current;
+        setElapsedTime(elapsed);
+        console.log("Timer stopped. Elapsed time:", elapsed / 1000, "seconds");
+
+        handleTimeUp(elapsed);
       }
     };
 
@@ -90,39 +83,76 @@ const InputCheckWordsVersion = ({ value }) => {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [activeLetterIndex, activeWordIndex, words, navigate]);
+  }, [activeLetterIndex, activeWordIndex, words]);
 
+  const calculateWPM = (elapsedTimeMs) => {
+    // Calculate Gross WPM
+    const totalCharactersTyped = activeWordIndex * 5 + activeLetterIndex; // Assuming each word is 5 characters
+    const grossWordsTyped = totalCharactersTyped / 5;
+    const minutes = elapsedTimeMs / 60000; // Convert milliseconds to minutes
+    const grossWPM = Math.round(grossWordsTyped / minutes);
+  
+    // Calculate Net WPM
+    const correctCharactersTyped = correctness.reduce((acc, word) => {
+      return acc + word.filter(letter => letter === 'correct').length;
+    }, 0);
+    const netWordsTyped = correctCharactersTyped / 5;
+    const netWPM = Math.round(netWordsTyped / minutes);
+  
+    return { grossWPM, netWPM };
+  };
 
+  const handleTimeUp = (elapsed) => {
+    setIsTimeUp(true);
+    const { grossWPM, netWPM } = calculateWPM(elapsed);
+    setGrossWPM(grossWPM);
+    setNetWPM(netWPM);
+    console.log(`Gross WPM: ${grossWPM}, Net WPM: ${netWPM}`);
+  };
 
+  useEffect(() => {
+    if (isTimeUp) {
+      const { grossWPM, netWPM } = calculateWPM(elapsedTime);
+      setGrossWPM(grossWPM);
+      setNetWPM(netWPM);
+      console.log(`Gross WPM: ${grossWPM}, Net WPM: ${netWPM}`);
+    }
+  }, [isTimeUp, elapsedTime]);
 
-
-    const calculateWPM = (elapsedTimeMs) => {
-      // Calculate Gross WPM
-      const totalCharactersTyped = activeWordIndex * 5 + activeLetterIndex; // Assuming each word is 5 characters
-      console.log(to)
-      const grossWordsTyped = totalCharactersTyped / 5;
-      const minutes = elapsedTimeMs / 60000;      
-      const grossWPM = Math.round(grossWordsTyped / minutes);
-    
-      // Calculate Net WPM
-      const correctCharactersTyped = correctness.reduce((acc, word) => {
-        return acc + word.filter(letter => letter === 'correct').length;
-      }, 0);
-      const netWordsTyped = correctCharactersTyped / 5;
-      const netWPM = Math.round(netWordsTyped / minutes);
-    
-      return { grossWPM, netWPM };
-    };
-    
-    
+  const resetWPM = () => {
+    setGrossWPM(0);
+    setNetWPM(0);
+    setIsTimeUp(false);
+    setActiveWordIndex(0);
+    setActiveLetterIndex(0);
+    setCorrectness([]);
+    setStartTimer(false);
+    setElapsedTime(0);
+    startTimeRef.current = null;
+    setWords(generateWords());
+  };
 
   return (
     <div className="relative w-full">
-    <div className="absolute top-4 right-4 text-pink-500">
-      <TimeTaken start={startTimer} onStop={(time) => setElapsedTime(time)} />
+      <div className="absolute top-4 right-4 text-pink-500">
+        <TimeTaken start={startTimer} onStop={(time) => setElapsedTime(time)} />
+      </div>
+      <WrapWords words={words} activeWordIndex={activeWordIndex} activeLetterIndex={activeLetterIndex} correctness={correctness} />
+      {isTimeUp ? (
+        <>
+          <p>Elapsed Time: {(elapsedTime / 1000).toFixed(2)} seconds</p>
+          <p>Gross WPM: {grossWPM}</p>
+          <p>Net WPM: {netWPM}</p>
+          <button onClick={resetWPM}>Reset</button>
+        </>
+      ) : (
+        <>
+          <p>Elapsed Time: 0 seconds</p>
+          <p>Gross WPM: 0</p>
+          <p>Net WPM: 0</p>
+        </>
+      )}
     </div>
-    <WrapWords words={words} activeWordIndex={activeWordIndex} activeLetterIndex={activeLetterIndex} correctness={correctness} />
-  </div>
   );
 };
 
